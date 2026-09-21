@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Madde Arama</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+            background: #f7f7f7;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        input[type="file"],
+        input[type="text"],
+        select,
+        button {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+
+        button {
+            background: #111827;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #374151;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            font-size: 14px;
+            vertical-align: top;
+        }
+
+        th {
+            background: #111827;
+            color: white;
+        }
+
+        .muted {
+            color: #666;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>PDF Madde Arama MVP</h1>
+
+    <div class="card">
+        <h3>1. PDF Yükle</h3>
+        <input type="file" id="fileInput" accept="application/pdf">
+        <button onclick="uploadPdf()">Yükle</button>
+        <div id="uploadStatus" class="muted"></div>
+    </div>
+
+    <div class="card">
+        <h3>2. Yüklenen PDF'ler</h3>
+        <select id="documentSelect" style="min-width: 400px;"></select>
+        <button onclick="loadDocuments()">Yenile</button>
+    </div>
+
+    <div class="card">
+        <h3>3. Kelime Ara</h3>
+        <input
+            type="text"
+            id="searchInput"
+            placeholder="Örn: topraklama"
+            style="min-width: 300px;"
+        >
+        <button onclick="searchPdf()">Ara</button>
+        <div id="searchStatus" class="muted"></div>
+    </div>
+
+    <div class="card">
+        <h3>Sonuçlar</h3>
+        <div id="resultCount" class="muted"></div>
+        <br>
+        <table>
+            <thead>
+                <tr>
+                    <th>Sayfa</th>
+                    <th>Satır</th>
+                    <th>Madde</th>
+                    <th>Metin</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_BASE = "";
+
+        async function loadDocuments() {
+            const response = await fetch(`${API_BASE}/api/documents`);
+            const documents = await response.json();
+
+            const select = document.getElementById("documentSelect");
+            select.innerHTML = "";
+
+            if (!documents.length) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Henüz yüklenmiş PDF yok";
+                select.appendChild(option);
+                return;
+            }
+
+            documents.forEach(doc => {
+                const option = document.createElement("option");
+                option.value = doc.id;
+                option.textContent = `${doc.original_name} (${doc.line_count} satır, ${doc.status})`;
+                select.appendChild(option);
+            });
+        }
+
+        async function uploadPdf() {
+            const fileInput = document.getElementById("fileInput");
+            const status = document.getElementById("uploadStatus");
+
+            if (!fileInput.files.length) {
+                status.textContent = "Önce bir PDF seçin.";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            status.textContent = "Yükleniyor...";
+
+            try {
+                const response = await fetch(`${API_BASE}/api/documents`, {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    status.textContent = data.detail || "Yükleme başarısız.";
+                    return;
+                }
+
+                status.textContent = `Yüklendi: ${data.filename}, ${data.line_count} satır.`;
+
+                if (data.warning) {
+                    status.textContent += ` Uyarı: ${data.warning}`;
+                }
+
+                await loadDocuments();
+            } catch (error) {
+                status.textContent = "Yükleme hatası: " + error.message;
+            }
+        }
+
+        async function searchPdf() {
+            const docId = document.getElementById("documentSelect").value;
+            const q = document.getElementById("searchInput").value.trim();
+            const status = document.getElementById("searchStatus");
+            const resultCount = document.getElementById("resultCount");
+            const tbody = document.getElementById("resultsBody");
+
+            tbody.innerHTML = "";
+            resultCount.textContent = "";
+
+            if (!docId) {
+                status.textContent = "Önce bir PDF seçin.";
+                return;
+            }
+
+            if (q.length < 2) {
+                status.textContent = "En az 2 karakter girin.";
+                return;
+            }
+
+            status.textContent = "Aranıyor...";
+
+            try {
+                const response = await fetch(
+                    `${API_BASE}/api/documents/${docId}/search?q=${encodeURIComponent(q)}`
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    status.textContent = data.detail || "Arama başarısız.";
+                    return;
+                }
+
+                status.textContent = "Arama tamamlandı.";
+                resultCount.textContent = `${data.count} sonuç bulundu.`;
+
+                data.results.forEach(item => {
+                    const tr = document.createElement("tr");
+
+                    const pageTd = document.createElement("td");
+                    pageTd.textContent = item.page;
+
+                    const lineTd = document.createElement("td");
+                    lineTd.textContent = item.line_on_page;
+
+                    const articleTd = document.createElement("td");
+                    articleTd.textContent = item.article_no || "-";
+
+                    const textTd = document.createElement("td");
+                    textTd.textContent = item.text;
+
+                    tr.appendChild(pageTd);
+                    tr.appendChild(lineTd);
+                    tr.appendChild(articleTd);
+                    tr.appendChild(textTd);
+
+                    tbody.appendChild(tr);
+                });
+
+            } catch (error) {
+                status.textContent = "Arama hatası: " + error.message;
+            }
+        }
+
+        window.onload = loadDocuments;
+    </script>
+
+</body>
+</html>
